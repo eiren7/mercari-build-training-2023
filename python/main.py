@@ -4,7 +4,7 @@ import pathlib
 import json
 import hashlib
 import uuid
-from fastapi import FastAPI, Form, HTTPException, File, UploadFile
+from fastapi import FastAPI, Form, HTTPException, status, File, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -34,6 +34,13 @@ def root():
 async def add_item(name: str = Form(...),
                 category: str = Form(...),
                 image: UploadFile = File(...)):
+    ALLOWED_IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png']
+    def is_image_file(filename: str) -> bool:
+        extension = os.path.splitext(filename)[1].lower()
+        return extension in ALLOWED_IMAGE_EXTENSIONS
+    if not is_image_file(image.filename):
+        return {"error": "Invalid image file"}
+    
     image_bytes = await image.read() # turn the image into a buffer-like object
     image_hashed = hashlib.sha256(image_bytes).hexdigest()  # hash the image
     new_image_name = image_hashed + ".jpg"
@@ -50,7 +57,7 @@ async def add_item(name: str = Form(...),
             }
 
     items_list.append(new_item)
-    #items.append(new_item)
+
     with open("items.json", "w") as f:
         json.dump(items, f)
     logger.info(f"Receive item: {name}")
@@ -65,6 +72,7 @@ def item_details(id: str):
     for item in items_list:
         if item["id"] == id:
             return item
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
 
 @app.get("/image/{image_filename}")
 async def get_image(image_filename):
