@@ -39,7 +39,7 @@ async def add_item(name: str = Form(...),
         extension = os.path.splitext(filename)[1].lower()
         return extension in ALLOWED_IMAGE_EXTENSIONS
     if not is_image_file(image.filename):
-        return {"error": "Invalid image file"}
+        raise HTTPException(status_code=400, detail="Invalid image file")
     
     image_bytes = await image.read() # turn the image into a buffer-like object
     image_hashed = hashlib.sha256(image_bytes).hexdigest()  # hash the image
