@@ -1,7 +1,10 @@
 import os
 import logging
 import pathlib
-from fastapi import FastAPI, Form, HTTPException
+import json
+import hashlib
+import uuid
+from fastapi import FastAPI, Form, HTTPException, status, File, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -18,18 +21,62 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+#import json
+with open("items.json") as f:
+    items = json.load(f)
+items_list = items["items"]
+
 @app.get("/")
 def root():
     return {"message": "Hello, world!"}
 
 @app.post("/items")
-def add_item(name: str = Form(...)):
+async def add_item(name: str = Form(...),
+                category: str = Form(...),
+                image: UploadFile = File(...)):
+    ALLOWED_IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png']
+    def is_image_file(filename: str) -> bool:
+        extension = os.path.splitext(filename)[1].lower()
+        return extension in ALLOWED_IMAGE_EXTENSIONS
+    if not is_image_file(image.filename):
+        raise HTTPException(status_code=400, detail="Invalid image file")
+    
+    image_bytes = await image.read() # turn the image into a buffer-like object
+    image_hashed = hashlib.sha256(image_bytes).hexdigest()  # hash the image
+    new_image_name = image_hashed + ".jpg"
+    with open(f"./images/{new_image_name}", "wb") as f:
+        f.write(image_bytes)  # write the hashed image to a file
+    
+    id = str(uuid.uuid4()) # generate an id to the new item
+
+    new_item = {
+            "id": id,
+            "name" : name,
+            "category" : category,
+            "image" : new_image_name
+            }
+
+    items_list.append(new_item)
+
+    with open("items.json", "w") as f:
+        json.dump(items, f)
     logger.info(f"Receive item: {name}")
     return {"message": f"item received: {name}"}
 
+@app.get("/items")
+def listed_items():
+    return items
+
+@app.get("/items/{id}")
+def item_details(id: str):
+    for item in items_list:
+        if item["id"] == id:
+            return item
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+
 @app.get("/image/{image_filename}")
 async def get_image(image_filename):
-    # Create image path
+# Create image path
     image = images / image_filename
 
     if not image_filename.endswith(".jpg"):
@@ -38,5 +85,4 @@ async def get_image(image_filename):
     if not image.exists():
         logger.debug(f"Image not found: {image}")
         image = images / "default.jpg"
-
     return FileResponse(image)
