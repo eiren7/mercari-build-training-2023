@@ -57,14 +57,47 @@ async def add_item(name: str = Form(...),
 
 @app.get("/items")
 def listed_items():
-    return items
+    connection = sqlite3.connect("../db/mercari.sqlite3")
+    cursor = connection.cursor()
 
-@app.get("/items/{id}")
-def item_details(id: str):
-    for item in items_list:
-        if item["id"] == id:
-            return item
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+    cursor.execute("SELECT * FROM items")
+    rows = cursor.fetchall()
+    connection.close()
+
+    return {"items": rows}
+
+@app.get("/search")
+def search_items(keyword: str):
+    connection = sqlite3.connect("../db/mercari.sqlite3")
+    cursor = connection.cursor()
+
+    if keyword:
+        cursor.execute(
+            "SELECT items.id, items.name, category.name AS category_name, items.image_name "
+            "FROM items "
+            "JOIN category ON items.category_id = category.id "
+            "WHERE items.name LIKE ?",
+            ('%' + keyword + '%',))
+    else:
+        return {"message": "Not found"}
+
+    rows = cursor.fetchall()
+
+    items = []  
+    for row in rows:
+        id, name, category_name, image_name = row
+        item = {
+            "id": id,
+            "name": name,
+            "category_name": category_name,
+            "image_name": image_name
+        }
+        items.append(item)
+
+    if len(items) == 0:
+        return {"message": "Not found"}
+    
+    return {"items": items}
 
 @app.get("/image/{image_filename}")
 async def get_image(image_filename):
