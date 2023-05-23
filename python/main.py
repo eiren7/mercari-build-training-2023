@@ -20,6 +20,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+#import json
+with open("items.json") as f:
+    items = json.load(f)
+items_list = items["items"]
+
 @app.get("/")
 def root():
     return {"message": "Hello, world!"}
