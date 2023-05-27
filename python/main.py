@@ -20,6 +20,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+DB_PATH = "db/mercari.sqlite3"
 @app.get("/")
 def root():
     return {"message": "Hello, world!"}
@@ -41,15 +42,18 @@ async def add_item(name: str = Form(...),
     with open(f"./images/{new_image_name}", "wb") as f:
         f.write(image_bytes)  # write the hashed image to a file
     
-    connection = sqlite3.connect("../db/mercari.sqlite3") # connect to database
+    connection = sqlite3.connect(DB_PATH) # connect to database
     cursor = connection.cursor()
 
-    category_sql = "INSERT INTO category (name) VALUES (?)"
+    category_sql = "INSERT OR IGNORE INTO category (name) VALUES (?)"
     cursor.execute(category_sql, (category,))
+    get_category_id_sql = "SELECT category.id FROM category WHERE category.name LIKE ?"
+    cursor.execute(get_category_id_sql, (category,))
+    category_id = cursor.fetchone()[0]
 
-    sql = "INSERT INTO items (name, category_id, image_name) VALUES (?, ?, ?)"
-    new_item = (name, category, new_image_name)
-    cursor.execute(sql, new_item)
+    new_item_sql = "INSERT INTO items (name, category_id, image_name) VALUES (?, ?, ?)"
+    new_item = (name, category_id, new_image_name)
+    cursor.execute(new_item_sql, new_item)
     connection.commit()
 
     logger.info(f"Receive item: {name}")
@@ -57,7 +61,7 @@ async def add_item(name: str = Form(...),
 
 @app.get("/items")
 def listed_items():
-    connection = sqlite3.connect("../db/mercari.sqlite3")
+    connection = sqlite3.connect(DB_PATH)
     cursor = connection.cursor()
 
     cursor.execute("SELECT * FROM items")
@@ -68,34 +72,32 @@ def listed_items():
 
 @app.get("/search")
 def search_items(keyword: str):
-    connection = sqlite3.connect("../db/mercari.sqlite3")
+    connection = sqlite3.connect(DB_PATH)
     cursor = connection.cursor()
 
     if keyword:
         cursor.execute(
-            "SELECT items.id, items.name, category.name AS category_name, items.image_name "
+            "SELECT items.name, category.name AS category_name, items.image_name "
             "FROM items "
             "JOIN category ON items.category_id = category.id "
             "WHERE items.name LIKE ?",
             ('%' + keyword + '%',))
-    else:
-        return {"message": "Not found"}
-
+    
     rows = cursor.fetchall()
 
     items = []  
     for row in rows:
-        id, name, category_name, image_name = row
+        name, category_name, image_name = row
         item = {
-            "id": id,
             "name": name,
             "category_name": category_name,
             "image_name": image_name
         }
+    
         items.append(item)
 
     if len(items) == 0:
-        return {"message": "Not found"}
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
     
     return {"items": items}
 
