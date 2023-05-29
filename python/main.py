@@ -1,9 +1,8 @@
 import os
 import logging
 import pathlib
-import json
+import sqlite3
 import hashlib
-import uuid
 from fastapi import FastAPI, Form, HTTPException, status, File, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,19 +20,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-#import json
-with open("items.json") as f:
-    items = json.load(f)
-items_list = items["items"]
-
+DB_PATH = "db/mercari.sqlite3"
 @app.get("/")
 def root():
     return {"message": "Hello, world!"}
 
 @app.post("/items")
 async def add_item(name: str = Form(...),
-                category: str = Form(...),
-                image: UploadFile = File(...)):
+                   category: str = Form(...),
+                   image: UploadFile = File(...)):
     ALLOWED_IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png']
     def is_image_file(filename: str) -> bool:
         extension = os.path.splitext(filename)[1].lower()
@@ -47,32 +42,64 @@ async def add_item(name: str = Form(...),
     with open(f"./images/{new_image_name}", "wb") as f:
         f.write(image_bytes)  # write the hashed image to a file
     
-    id = str(uuid.uuid4()) # generate an id to the new item
+    connection = sqlite3.connect(DB_PATH) # connect to database
+    cursor = connection.cursor()
 
-    new_item = {
-            "id": id,
-            "name" : name,
-            "category" : category,
-            "image" : new_image_name
-            }
+    category_sql = "INSERT OR IGNORE INTO category (name) VALUES (?)"
+    cursor.execute(category_sql, (category,))
+    get_category_id_sql = "SELECT category.id FROM category WHERE category.name LIKE ?"
+    cursor.execute(get_category_id_sql, (category,))
+    category_id = cursor.fetchone()[0]
 
-    items_list.append(new_item)
+    new_item_sql = "INSERT INTO items (name, category_id, image_name) VALUES (?, ?, ?)"
+    new_item = (name, category_id, new_image_name)
+    cursor.execute(new_item_sql, new_item)
+    connection.commit()
 
-    with open("items.json", "w") as f:
-        json.dump(items, f)
     logger.info(f"Receive item: {name}")
     return {"message": f"item received: {name}"}
 
 @app.get("/items")
 def listed_items():
-    return items
+    connection = sqlite3.connect(DB_PATH)
+    cursor = connection.cursor()
 
-@app.get("/items/{id}")
-def item_details(id: str):
-    for item in items_list:
-        if item["id"] == id:
-            return item
+    cursor.execute("SELECT * FROM items")
+    rows = cursor.fetchall()
+    connection.close()
+
+    return {"items": rows}
+
+@app.get("/search")
+def search_items(keyword: str):
+    connection = sqlite3.connect(DB_PATH)
+    cursor = connection.cursor()
+
+    if keyword:
+        cursor.execute(
+            "SELECT items.name, category.name AS category_name, items.image_name "
+            "FROM items "
+            "JOIN category ON items.category_id = category.id "
+            "WHERE items.name LIKE ?",
+            ('%' + keyword + '%',))
+    
+    rows = cursor.fetchall()
+
+    items = []  
+    for row in rows:
+        name, category_name, image_name = row
+        item = {
+            "name": name,
+            "category_name": category_name,
+            "image_name": image_name
+        }
+    
+        items.append(item)
+
+    if len(items) == 0:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+    
+    return {"items": items}
 
 @app.get("/image/{image_filename}")
 async def get_image(image_filename):
